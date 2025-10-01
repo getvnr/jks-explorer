@@ -243,7 +243,7 @@ if st.session_state.keystore:
         pfx_all_password = st.text_input("PFX Password (for all entries)", type="password", key="pfx_all_pass")
         if st.button("Convert JKS to PFX") and pfx_all_password:
             try:
-                # Create a ZIP-like structure in memory for PFX files (simulating multiple entries)
+                # Create a ZIP-like structure in memory for PFX files
                 zip_buffer = io.BytesIO()
                 with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
                     for alias, entry in ks.private_keys.items():
@@ -294,7 +294,7 @@ if st.session_state.keystore:
             if st.button("Export as PFX") and pfx_export_password:
                 try:
                     entry = ks.private_keys[selected_pfx_alias]
-                    private_key = serialization.load_der_private_key(entry.pkey, password=None, default_backend())
+                    private_key = serialization.load_der_private_key(entry.pkey, password=None, backend=default_backend())
                     
                     # Load certificates from chain
                     certs = []

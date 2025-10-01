@@ -6,6 +6,7 @@ from cryptography.hazmat.primitives.serialization import pkcs12
 from cryptography.hazmat.backends import default_backend
 import io
 import os
+import zipfile
 from datetime import datetime
 
 # Page config
@@ -21,7 +22,7 @@ with st.sidebar:
     - Upload your JKS file and enter the keystore password.
     - Explore entries below.
     - Use buttons to export, delete, or import.
-    - Download updated keystore or PFX after changes.
+    - Download updated keystore, PFX, or ZIP of certificates.
     **Security Note:** Handle passwords and files securely. This app runs locally.
     """)
     st.markdown("### Requirements")
@@ -224,7 +225,7 @@ if st.session_state.keystore:
         st.subheader("Export & Download")
         
         # Export entire keystore as JKS
-        st.markdown("### Download Updated Keystore")
+        st.markdown("### Download Updated Keystore (JKS)")
         if st.button("Download Updated JKS"):
             # Save to bytes
             output = io.BytesIO()
@@ -237,6 +238,53 @@ if st.session_state.keystore:
                 mime="application/octet-stream"
             )
 
+        # Export entire keystore as PFX
+        st.markdown("### Convert Entire Keystore to PFX")
+        pfx_all_password = st.text_input("PFX Password (for all entries)", type="password", key="pfx_all_pass")
+        if st.button("Convert JKS to PFX") and pfx_all_password:
+            try:
+                # Create a ZIP-like structure in memory for PFX files (simulating multiple entries)
+                zip_buffer = io.BytesIO()
+                with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+                    for alias, entry in ks.private_keys.items():
+                        private_key = serialization.load_der_private_key(entry.pkey, password=None, backend=default_backend())
+                        certs = [x509.load_der_x509_certificate(cert_der, default_backend()) for _, cert_der in entry.cert_chain]
+                        primary_cert = certs[0] if certs else None
+                        additional_certs = certs[1:] if len(certs) > 1 else []
+                        
+                        # Serialize each private key entry to PFX
+                        pfx_data = pkcs12.serialize_key_and_certificates(
+                            name=alias.encode(),
+                            key=private_key,
+                            cert=primary_cert,
+                            cas=additional_certs,
+                            encryption_algorithm=serialization.BestAvailableEncryption(pfx_all_password.encode())
+                        )
+                        zf.writestr(f"{alias}.pfx", pfx_data)
+                    
+                    # Add trusted certificates as additional certs in a single PFX
+                    trusted_certs = [x509.load_der_x509_certificate(entry.cert, default_backend()) for _, entry in ks.certs.items()]
+                    if trusted_certs:
+                        pfx_data = pkcs12.serialize_key_and_certificates(
+                            name=b"trusted_certs",
+                            key=None,  # No private key for trusted certs
+                            cert=None,  # No primary cert
+                            cas=trusted_certs,
+                            encryption_algorithm=serialization.BestAvailableEncryption(pfx_all_password.encode())
+                        )
+                        zf.writestr("trusted_certs.pfx", pfx_data)
+                
+                zip_buffer.seek(0)
+                st.download_button(
+                    label="Download All Entries as PFX (ZIP)",
+                    data=zip_buffer.getvalue(),
+                    file_name=f"keystore_pfx_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip",
+                    mime="application/zip"
+                )
+                st.success("Converted JKS to PFX files (zipped)")
+            except Exception as e:
+                st.error(f"Failed to convert JKS to PFX: {e}")
+
         # Export private key + certificate as PFX
         st.markdown("### Export Private Key + Certificate as PFX")
         private_key_aliases = list(ks.private_keys.keys())
@@ -246,7 +294,7 @@ if st.session_state.keystore:
             if st.button("Export as PFX") and pfx_export_password:
                 try:
                     entry = ks.private_keys[selected_pfx_alias]
-                    private_key = serialization.load_der_private_key(entry.pkey, password=None, backend=default_backend())
+                    private_key = serialization.load_der_private_key(entry.pkey, password=None, default_backend())
                     
                     # Load certificates from chain
                     certs = []
@@ -279,9 +327,37 @@ if st.session_state.keystore:
         else:
             st.info("No private key entries available to export as PFX.")
 
-        # Option to export all certs
-        if st.button("Export All Certificates as ZIP (TODO: Implement ZIP)"):
-            st.info("ZIP export not implemented in this version. Use individual exports above.")
+        # Export all certificates as ZIP
+        st.markdown("### Export All Certificates as ZIP")
+        if st.button("Export All Certificates as ZIP"):
+            try:
+                # Create ZIP in memory
+                zip_buffer = io.BytesIO()
+                with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+                    # Private key certificates
+                    for alias, entry in ks.private_keys.items():
+                        for i, (cert_name, cert_der) in enumerate(entry.cert_chain):
+                            cert = x509.load_der_x509_certificate(cert_der, default_backend())
+                            pem_data = cert.public_bytes(serialization.Encoding.PEM)
+                            cert_type = "end_entity" if i == 0 else "intermediate" if i < len(entry.cert_chain) - 1 else "root"
+                            zf.writestr(f"{alias}_{cert_type}.pem", pem_data)
+                    
+                    # Trusted certificates
+                    for alias, entry in ks.certs.items():
+                        cert = x509.load_der_x509_certificate(entry.cert, default_backend())
+                        pem_data = cert.public_bytes(serialization.Encoding.PEM)
+                        zf.writestr(f"trusted_{alias}.pem", pem_data)
+                
+                zip_buffer.seek(0)
+                st.download_button(
+                    label="Download All Certificates (ZIP)",
+                    data=zip_buffer.getvalue(),
+                    file_name=f"certificates_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip",
+                    mime="application/zip"
+                )
+                st.success("Exported all certificates as ZIP")
+            except Exception as e:
+                st.error(f"Failed to export certificates as ZIP: {e}")
 
 else:
     st.info("👆 Upload a JKS file and enter password to get started.")

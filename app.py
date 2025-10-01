@@ -4,8 +4,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.backends import default_backend
 import io
-import base64
-from datetime import datetime
+import os
 
 # Page config
 st.set_page_config(page_title="JKS Explorer", page_icon="🔑", layout="wide")
@@ -71,11 +70,22 @@ if st.session_state.keystore:
             for alias, entry in ks.private_keys.items():
                 with st.expander(f"{alias} (PrivateKeyEntry)"):
                     col1, col2 = st.columns(2)
-                    with col1:
-                        st.write(f"**Algorithm:** {entry.algorithm}")
-                        st.write(f"**Key Size:** {entry.key_size} bits")
-                    with col2:
-                        st.write(f"**Chain Length:** {len(entry.cert_chain)}")
+                    try:
+                        # Parse private key to get algorithm and key size
+                        private_key = serialization.load_der_private_key(
+                            entry.pkey, password=None, backend=default_backend()
+                        )
+                        algorithm = private_key.__class__.__name__.replace("PrivateKey", "")
+                        key_size = private_key.key_size if hasattr(private_key, "key_size") else "N/A"
+                        
+                        with col1:
+                            st.write(f"**Algorithm:** {algorithm}")
+                            st.write(f"**Key Size:** {key_size} bits")
+                        with col2:
+                            st.write(f"**Chain Length:** {len(entry.cert_chain)}")
+                    except Exception as e:
+                        st.error(f"Error parsing private key for {alias}: {e}")
+                        continue
                     
                     # Cert chain
                     for i, (cert_name, cert_der) in enumerate(entry.cert_chain):
@@ -178,28 +188,3 @@ if st.session_state.keystore:
         # Export specific cert (reuse from explore, but here full keystore download)
         st.markdown("### Download Updated Keystore")
         if st.button("Download Updated JKS"):
-            # Save to bytes
-            output = io.BytesIO()
-            ks.save(output, passw)
-            output.seek(0)
-            st.download_button(
-                label="Download JKS",
-                data=output.getvalue(),
-                file_name=f"updated_keystore_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jks",
-                mime="application/octet-stream"
-            )
-
-        # Option to export all certs
-        if st.button("Export All Certificates as ZIP (TODO: Implement ZIP)"):
-            st.info("ZIP export not implemented in this version. Use individual exports above.")
-
-else:
-    st.info("👆 Upload a JKS file and enter password to get started.")
-
-# Clean up temp file on rerun if needed, but Streamlit handles
-if st.button("Clear Session"):
-    if st.session_state.temp_jks_path and os.path.exists(st.session_state.temp_jks_path):
-        os.remove(st.session_state.temp_jks_path)
-    for key in list(st.session_state.keys()):
-        del st.session_state[key]
-    st.rerun()

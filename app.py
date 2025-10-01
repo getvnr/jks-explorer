@@ -21,7 +21,7 @@ with st.sidebar:
     - Upload your JKS file and enter the keystore password.
     - Explore entries below.
     - Use buttons to export, delete, or import.
-    - Download updated keystore after changes.
+    - Download updated keystore or PFX after changes.
     **Security Note:** Handle passwords and files securely. This app runs locally.
     """)
     st.markdown("### Requirements")
@@ -223,7 +223,7 @@ if st.session_state.keystore:
     with tab4:
         st.subheader("Export & Download")
         
-        # Export specific cert (reuse from explore, but here full keystore download)
+        # Export entire keystore as JKS
         st.markdown("### Download Updated Keystore")
         if st.button("Download Updated JKS"):
             # Save to bytes
@@ -236,6 +236,48 @@ if st.session_state.keystore:
                 file_name=f"updated_keystore_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jks",
                 mime="application/octet-stream"
             )
+
+        # Export private key + certificate as PFX
+        st.markdown("### Export Private Key + Certificate as PFX")
+        private_key_aliases = list(ks.private_keys.keys())
+        if private_key_aliases:
+            selected_pfx_alias = st.selectbox("Select Private Key Alias to Export as PFX", private_key_aliases, key="pfx_export_alias")
+            pfx_export_password = st.text_input("PFX Export Password", type="password", key="pfx_export_pass")
+            if st.button("Export as PFX") and pfx_export_password:
+                try:
+                    entry = ks.private_keys[selected_pfx_alias]
+                    private_key = serialization.load_der_private_key(entry.pkey, password=None, backend=default_backend())
+                    
+                    # Load certificates from chain
+                    certs = []
+                    for _, cert_der in entry.cert_chain:
+                        cert = x509.load_der_x509_certificate(cert_der, default_backend())
+                        certs.append(cert)
+                    
+                    # Primary certificate is first in chain
+                    primary_cert = certs[0] if certs else None
+                    additional_certs = certs[1:] if len(certs) > 1 else []
+                    
+                    # Serialize to PFX
+                    pfx_data = pkcs12.serialize_key_and_certificates(
+                        name=selected_pfx_alias.encode(),
+                        key=private_key,
+                        cert=primary_cert,
+                        cas=additional_certs,
+                        encryption_algorithm=serialization.BestAvailableEncryption(pfx_export_password.encode())
+                    )
+                    
+                    st.download_button(
+                        label="Download PFX",
+                        data=pfx_data,
+                        file_name=f"{selected_pfx_alias}.pfx",
+                        mime="application/x-pkcs12"
+                    )
+                    st.success(f"Exported private key + cert chain for '{selected_pfx_alias}' as PFX")
+                except Exception as e:
+                    st.error(f"Failed to export PFX: {e}")
+        else:
+            st.info("No private key entries available to export as PFX.")
 
         # Option to export all certs
         if st.button("Export All Certificates as ZIP (TODO: Implement ZIP)"):

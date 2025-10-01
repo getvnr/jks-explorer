@@ -95,7 +95,7 @@ if st.session_state.keystore:
                         st.write(f"**Subject:** {cert.subject.rfc4514_string()}")
                         st.write(f"**Issuer:** {cert.issuer.rfc4514_string()}")
                         st.write(f"**Valid From:** {cert.not_valid_before}")
-                        st.write(f"**Valid Until:** {cert.not_valid_until}")
+                        st.write(f"**Valid Until:** {cert.not_valid_after}")  # Fixed here
                     
                     # Export cert button (first in chain)
                     if entry.cert_chain:
@@ -124,7 +124,7 @@ if st.session_state.keystore:
                         st.write(f"**Issuer:** {cert.issuer.rfc4514_string()}")
                     with col2:
                         st.write(f"**Valid From:** {cert.not_valid_before}")
-                        st.write(f"**Valid Until:** {cert.not_valid_until}")
+                        st.write(f"**Valid Until:** {cert.not_valid_after}")  # Fixed here
                     
                     # Export button
                     if st.button(f"Export Cert as PEM ({alias})", key=f"exp_tc_{alias}"):

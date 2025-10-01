@@ -2,6 +2,7 @@ import streamlit as st
 import jks
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.serialization import pkcs12
 from cryptography.hazmat.backends import default_backend
 import io
 import os
@@ -95,7 +96,7 @@ if st.session_state.keystore:
                         st.write(f"**Subject:** {cert.subject.rfc4514_string()}")
                         st.write(f"**Issuer:** {cert.issuer.rfc4514_string()}")
                         st.write(f"**Valid From:** {cert.not_valid_before}")
-                        st.write(f"**Valid Until:** {cert.not_valid_after}")  # Fixed here
+                        st.write(f"**Valid Until:** {cert.not_valid_after}")
                     
                     # Export cert button (first in chain)
                     if entry.cert_chain:
@@ -124,7 +125,7 @@ if st.session_state.keystore:
                         st.write(f"**Issuer:** {cert.issuer.rfc4514_string()}")
                     with col2:
                         st.write(f"**Valid From:** {cert.not_valid_before}")
-                        st.write(f"**Valid Until:** {cert.not_valid_after}")  # Fixed here
+                        st.write(f"**Valid Until:** {cert.not_valid_after}")
                     
                     # Export button
                     if st.button(f"Export Cert as PEM ({alias})", key=f"exp_tc_{alias}"):
@@ -147,12 +148,15 @@ if st.session_state.keystore:
 
     with tab2:
         st.subheader("Import Certificate")
-        uploaded_cert = st.file_uploader("Choose a certificate file (PEM/DER)", type=["pem", "der", "crt", "cer"])
-        new_alias = st.text_input("New Alias")
-        if st.button("Import as Trusted Cert") and uploaded_cert and new_alias:
+        
+        # Import Trusted Cert
+        st.markdown("### Import as Trusted Certificate")
+        uploaded_cert = st.file_uploader("Choose a certificate file (PEM/DER)", type=["pem", "der", "crt", "cer"], key="trusted_uploader")
+        new_alias_trusted = st.text_input("New Alias (Trusted)", key="trusted_alias")
+        if st.button("Import as Trusted Cert") and uploaded_cert and new_alias_trusted:
             try:
                 cert_data = uploaded_cert.read()
-                if uploaded_cert.name.endswith('.pem'):
+                if uploaded_cert.name.lower().endswith('.pem'):
                     cert = x509.load_pem_x509_certificate(cert_data, default_backend())
                     cert_der = cert.public_bytes(serialization.Encoding.DER)
                 else:
@@ -160,11 +164,44 @@ if st.session_state.keystore:
                     cert = x509.load_der_x509_certificate(cert_der, default_backend())
                 
                 # Add to keystore
-                tce = jks.TrustedCertEntry(new_alias, cert_der)
-                ks.certs[new_alias] = tce
-                st.success(f"Imported certificate for alias '{new_alias}'")
+                tce = jks.TrustedCertEntry(new_alias_trusted, cert_der)
+                ks.certs[new_alias_trusted] = tce
+                st.success(f"Imported trusted certificate for alias '{new_alias_trusted}'")
+                st.rerun()
             except Exception as e:
-                st.error(f"Failed to import: {e}")
+                st.error(f"Failed to import trusted cert: {e}")
+        
+        # Import PFX (Private Key + Cert)
+        st.markdown("### Import Private Key + Personal Certificate (PFX/P12)")
+        uploaded_pfx = st.file_uploader("Choose a PFX/P12 file", type=["pfx", "p12"], key="pfx_uploader")
+        pfx_password = st.text_input("PFX Password", type="password", key="pfx_pass")
+        new_alias_pfx = st.text_input("New Alias (PrivateKey)", key="pfx_alias")
+        if st.button("Import PFX as PrivateKeyEntry") and uploaded_pfx and pfx_password and new_alias_pfx:
+            try:
+                pfx_data = uploaded_pfx.read()
+                private_key, cert, additional_certs = pkcs12.load_key_and_certificates(pfx_data, pfx_password.encode(), default_backend())
+                
+                # Serialize private key to DER PKCS#8
+                pkey_der = private_key.private_bytes(
+                    encoding=serialization.Encoding.DER,
+                    format=serialization.PrivateFormat.PKCS8,
+                    encryption_algorithm=serialization.NoEncryption()
+                )
+                
+                # Build cert chain: end-entity first, then additional
+                cert_chain = []
+                cert_chain.append((new_alias_pfx, cert.public_bytes(serialization.Encoding.DER)))
+                for add_cert in additional_certs:
+                    chain_alias = f"{new_alias_pfx}_intermediate"
+                    cert_chain.append((chain_alias, add_cert.public_bytes(serialization.Encoding.DER)))
+                
+                # Create PrivateKeyEntry
+                pke = jks.PrivateKeyEntry(new_alias_pfx, pkey_der, cert_chain)
+                ks.private_keys[new_alias_pfx] = pke
+                st.success(f"Imported private key + cert chain for alias '{new_alias_pfx}'")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Failed to import PFX: {e}")
 
     with tab3:
         st.subheader("Delete Entry")

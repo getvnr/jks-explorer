@@ -5,6 +5,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.backends import default_backend
 import io
 import os
+from datetime import datetime
 
 # Page config
 st.set_page_config(page_title="JKS Explorer", page_icon="🔑", layout="wide")
@@ -188,3 +189,28 @@ if st.session_state.keystore:
         # Export specific cert (reuse from explore, but here full keystore download)
         st.markdown("### Download Updated Keystore")
         if st.button("Download Updated JKS"):
+            # Save to bytes
+            output = io.BytesIO()
+            ks.save(output, passw)
+            output.seek(0)
+            st.download_button(
+                label="Download JKS",
+                data=output.getvalue(),
+                file_name=f"updated_keystore_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jks",
+                mime="application/octet-stream"
+            )
+
+        # Option to export all certs
+        if st.button("Export All Certificates as ZIP (TODO: Implement ZIP)"):
+            st.info("ZIP export not implemented in this version. Use individual exports above.")
+
+else:
+    st.info("👆 Upload a JKS file and enter password to get started.")
+
+# Clean up temp file on rerun if needed
+if st.button("Clear Session"):
+    if st.session_state.temp_jks_path and os.path.exists(st.session_state.temp_jks_path):
+        os.remove(st.session_state.temp_jks_path)
+    for key in list(st.session_state.keys()):
+        del st.session_state[key]
+    st.rerun()
